@@ -528,6 +528,7 @@ public class DslWatcher {
 好了，我们已经通过运行DSL得到了包含所有需求信息的`FileWatcherDslContext`对象，但是，目前用户想要的文件监控过程还没有开始，接下来就是从技术细节上怎么实现这个需求目标，欢迎继续阅读下一篇文章：[实验驱动开发与响应式编程 ---- File Watcher的技术实现](http://blog.csdn.net/liuwenzhe2008/article/details/52185447)。
 
  ---------------------- 本博客所有内容均为原创，转载请注明作者和出处 -----------------------
+ 
  作者：刘文哲
 
  联系方式：liuwenzhe2008@qq.com
