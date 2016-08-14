@@ -1,245 +1,430 @@
+File Watcher，是由wenzhe本人开发的一个文件监控工具（见：[File Watcher，不只是一个工具](http://blog.csdn.net/liuwenzhe2008/article/details/52185351)），关于它的具体需求以及需求分析过程，请参加wenzhe本人的另一篇文章： [基于领域特定语言（DSL）的用例驱动开发（UDD）](http://blog.csdn.net/liuwenzhe2008/article/details/52184910)。
 
-本文通过设计File Watcher这个软件，来阐述DSL-UDD设计思想。
-# 文件监控工具File Watcher的设计愿景
+不同于需求分析，本文主要立足于其技术实现细节。本文通过介绍它的技术实现过程，来阐述两个概念：实验驱动开发（EDD），以及响应式编程（使用RxJava库）。
 
-1. 监控文件（夹）变化，包括文件（夹）的创建、修改、删除
-2. 文件变化时能够自动运行指定的命令
-3. 方便用户配置要监控的文件（夹），能够定义丰富灵活的过滤规则
-4. 每个用户都可以有自己的配置，不同用户的配置可以不相同
-5. 被触发运行的命令可以是shell命令，shell脚本，也可以是某种编程语言代码
-6. 命令可以是同步执行，也可以是异步执行
-7. 容易定制，配置灵活，方便扩展。
-8. 跨平台，至少支持Windows和Linux
-9. 绿色版发布，无需安装，不需要管理员权限也能使用
+# 实验驱动开发（EDD）
+     
+一个产品的功能除了受控于需求之外，另外还受到技术的限制。对于需求导向，我已经介绍过DSL-UDD驱动开发；对于技术导向，这里将要介绍的是实验驱动开发（EDD，wenzhe本文自创概念）。
+     
+   在编写产品代码之前，先根据需要，比较和选择合适的技术、框架、开源库，验证技术可行性，明确实现上的难点，通过实验解决。先做实验，看看如何使用，有什么坑（注意事项），有什么优缺点，能否满足产品的要求。
+   
+   通过实验的方式来验证相关技术的可行性，解决技术难点，调整实现的思路，从而决定开发的方向。也就是说，在编写产品代码前通过实验来驱动开发的方向，这样的开发模式，用一个酷一点的词来描述，我称它为“实验驱动开发”（这个词也许是我的首创），英文简写就叫做“EDD”吧，^_^。
 
+   实验驱动开发（EDD）与测试驱动开发（TDD）的区别，是测试代码是用来测试产品代码的，以保证产品代码的测试覆盖率，确保产品代码的高质量和可靠性。缺点是写测试代码是比较耗时间的，而且在项目早期很多技术还未定型之前，即使产品代码都会经常重写和大量修改，其对应的测试代码也需要跟着修改以区别测试通过。在项目早期存在很多不确定性的时候，维护大量测试代码是一项耗时耗力的工作，也容易束缚技术的探索。即使存在可能更好的需要花时间探索的技术实现方向，但因为已经写了这么多测试代码，很多人天生的惰性会不舍得扔掉从而不去探索新的技术方向。
 
-# 跟随用例，理解需求
-产品要站在用户使用的角度来描述，这样才容易使用，才能够让用户喜欢。
+与此不同，实验代码只是做实验，与产品代码无关，其作用是快速通过实验来验证想法是否可行。不管可不可行，实验代码都只是独立的小程序，哪怕产品代码发生翻天覆地的变化，实验代码也都还是可以运行的，它与产品代码相互独立，毫无关联。
 
-上面的设计愿景的描述，还是比较抽象，估计不同开发者理解起来都有所偏差，最好是跟用户一起，通过不断交流、反馈，来理解。
+写实验代码的要点是：
 
-让我跟用户一起，通过构造用户需要的一个具体用例，通过讨论来理解需求。我一边跟用户讨论需求，一边将我所理解的，用“英语”描述一下起来。
+1. **快速**：快速探索新的idea，快速验证新的想法是否可行，快速搭建一个运行环境，快速让你的想法跑起来，快速看到期望的或不期望的结果。
+2. **小**。每个实验都是小程序，只验证单个想法，不同想法由不同实验来验证，写在不同的小程序中。
+3. **独立**。不与产品代码有相互依赖，也不与其他实验依赖，每个实验都是独立可运行的小程序。同时实验代码不会打包进产品中。
+4. **发散思维**。新想法是发散思维的，不应该受到太多现有代码的约束，否则很难有大的飞跃。验证新想法的实验也应该是没有束缚的，想怎么写就怎么写。
+5. **尽早发现更多问题**。想法通常是好的，但通常没有完美的技术实现。你采用某种技术能解决一些问题，但也会出现另一些问题，发现这些问题是写实验代码的责任和义务。通过实验，尽早地让尽可能多的问题暴露出来，以便采取对策。
 
-用户说道，他想监控文件“file1.md”的变化，如果变化了，自动调用脚本“update_blog.bat”，将文件自动更新到他的博客上。
-我随手用“英语”描述了他的话，如下：
-``` groovy
-  watch "E:/wenzhe/file1.md" on file modified {
-    "E:/wenzhe/script/update_blog.bat".execute()
+实验的代码也是宝贵的代码资源，同样需要保留在源码中，以便于以后回顾理解开发思路，也方便以后做更多实验做参考比较。当然，实验代码不能编译进产品中，因此，我把它们放在maven工程的src/test/java中，包名包含experiment，以便与unit test代码区分开。这样既能保留在源码中，又不会编译进产品。
+   
+   实验要针对产品的需要来做，一个实验只针对一项或少数的功能验证，以探索和验证某一技术解决方案为目的，而无需考虑产品的整体。每个实验的关注点在于局部，这是实验性代码与产品代码的不同。
+   
+  把产品技术实现难点细分到每个实验，把精力集中到一点，然后一点一点地从而解决整个问题。
+  
+  实验中的代码可以尝试各种情况，允许成功与失败。失败的代码也是宝贵的资源，不要删除，保留在源码中。失败的代码可以积累经验。在传统的软件开发中，使用某项技术之前没有做实验就直接设计和编写产品代码，很有可能在开发到一半才发现思路错了，那就需要返工，不仅浪费时间，而且还破坏原有设计良好的代码。相反，采用实验驱动开发，设计和编写产品代码之前通过实验试错，可以避免这些问题。
+  
+  在实验中积累了的有利于产品开发的代码，可以加入到产品代码中去。花时间去做实验，其实一点也不浪费。
+
+## WatchService
+本项目的主要难点在于如何监控文件的变化。可以考虑Java 7自带的WatchService。它底层采用操作系统的文件监控服务，当文件（夹）发生变化（增删改）时，操作系统会发送事件，WatchService监听到事件后会回调我们的代码。它利用了操作系统的底层机制，无需定时轮询遍历整个文件夹。
+
+  通过对WatchService简单实验，我发现WatchService有一些问题不能满足需求：
+  
+（1）WatchService只能监控文件夹，不能监控文件。
+（2）只能监控文件夹下的第一层文件，不能递归地监控每一层的文件
+（3）当文件修改时，连续收到两次或三次同样的事件。
+（4）Windows下，当监控一个非空子目录时，无法删除其父目录。
+（5）当一个文件创建时，会发两个事件，第一个是Create事件，第二个是Modify事件。
+
+针对第一个问题，我的解决方案是监控文件的父目录，然后通过过滤只选出要监控的文件。
+
+针对第二个问题，我的解决方案是通过Java 7提供的Files.walkFileTree来得到每个目录，然后都加到WatchService里。
+
+针对第三个问题，我的解决方案是使用缓存，1.5秒内若是收到同样的事件则忽略掉，也就是去抖动，避免无谓的重复处理。
+
+第四个问题，发现已经有人向Oracle公司提Bug，但Oracle表示won't fix，因为这是Windows的问题，不是Java的问题。
+
+第五个问题，可以认为文件创建会抛出两个事件就好，其实并不算问题，知道这个规则就好，本项目不做特别处理。
+
+通过实验，我们能够尽早地发现问题，并且调整我们的实现策略，将困难更早地暴露出来尽早处理。
+
+下面给出了对WatchService的实验代码：
+``` java
+/**
+ * @author wen-zhe.liu@asml.com
+ *
+ */
+public class FileWatcher1 {
+  
+  private static List<Path> getDirsToWatch(Path path) throws IOException {
+    List<Path> dirsToWatch = new ArrayList<>(); 
+    Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+
+      @Override
+      public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+        dirsToWatch.add(dir);
+        return FileVisitResult.CONTINUE;
+      }
+    });
+    return dirsToWatch;
   }
-```
-又提了一个需求，想要我提供一个开关，能对单独控制每个文件夹或文件的监控。于是我在每个`watch`前面加上了`start to`（启动监控）或者`stop to`（关闭监控），描述如下：
-``` groovy
-  start to watch "E:/wenzhe/file1.md" on file modified {
-    "E:/wenzhe/script/update_blog.bat".execute()
-  }
-  stop to watch "E:/wenzhe/file2.md" on file modified {
-    "E:/wenzhe/script/update_blog.bat".execute()
-  }
-```
-我发现一个问题，就是某些脚本调用可能是需要指定工作路径的，不然运行就会出错，因此需要用户提供恰当的工作路径。
-``` groovy
-  start to watch "E:/wenzhe/file1.md" on file modified {
-    "E:/wenzhe/script/update_blog.bat".execute(null, new File("E:/wenzhe/script")
-  }
-```
-接着，他说还有另一个脚本“send_email.bat”，需要在前面提到的脚本“update_blog.bat”成功调用后被调用。
-``` groovy
-  start to watch "E:/wenzhe/file1.md" on file modified {
-    def process = "E:/wenzhe/script/update_blog.bat".execute()
-    process.text.eachLine { println it }
-    if (process.exitValue() == 0) {
-      "E:/wenzhe/script/send_email.bat".execute()
+
+  /**
+   * @param args
+   * @throws IOException 
+   * @throws InterruptedException 
+   */
+  public static void main(String[] args) throws IOException, InterruptedException {
+    try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
+    
+      Path root = Paths.get("E:/wenzhe");
+      
+      List<Path> dirsToWatch = getDirsToWatch(root);
+      
+      Map<Path, WatchKey> pathWatchKeyMap = new HashMap<>();
+      
+      for (Path path : dirsToWatch) {
+        WatchKey watchKey = path.register(watcher,   
+            StandardWatchEventKinds.ENTRY_CREATE,  
+            StandardWatchEventKinds.ENTRY_DELETE,  
+            StandardWatchEventKinds.ENTRY_MODIFY);
+        pathWatchKeyMap.put(path, watchKey);
+      }
+      
+      Map<Kind<?>, String> fileUpdateTypes = ImmutableMap.of(
+          StandardWatchEventKinds.ENTRY_CREATE, "created",
+          StandardWatchEventKinds.ENTRY_DELETE, "deleted",
+          StandardWatchEventKinds.ENTRY_MODIFY, "modified");
+  
+      while (true) {  
+        WatchKey key = watcher.take();  
+        for (WatchEvent<?> event: key.pollEvents()) {  
+          Path watchablePath = (Path) key.watchable();
+          Path path = watchablePath.resolve((Path) event.context());
+          Kind<?> kind = event.kind();
+          
+          String fileType = Files.isDirectory(path) ? "Folder" : "File";
+          String updateType = fileUpdateTypes.getOrDefault(event.kind(), "unknown");
+          System.out.printf("%s %s to %s\n", fileType, updateType, path.toString());  
+          
+          if (kind == StandardWatchEventKinds.ENTRY_CREATE && Files.isDirectory(path)) {
+            WatchKey watchKey = path.register(watcher,   
+                StandardWatchEventKinds.ENTRY_CREATE,  
+                StandardWatchEventKinds.ENTRY_DELETE,  
+                StandardWatchEventKinds.ENTRY_MODIFY); 
+            pathWatchKeyMap.put(path, watchKey);
+          } else if (kind == StandardWatchEventKinds.ENTRY_DELETE && !Files.exists(path)) {
+            WatchKey watchKey = pathWatchKeyMap.get(path);
+            if (watchKey != null) {
+              pathWatchKeyMap.remove(path);
+              watchKey.cancel();
+              System.out.println("watchKey.cancel()");
+            }
+          }
+        }  
+  
+        System.out.println("key.isValid(): " + key.isValid());
+        if (key.isValid() && !key.reset()) {  
+          System.out.println("!key.reset()");
+          break;  
+        }  
+      }
+    } catch (Throwable e) {
+      e.printStackTrace();
+    } finally {
+      System.out.println("Exit");
     }
   }
-```
-另外还有一个脚本“upload_to_cloud.bat”，跟前面两个互不影响，可以跟第一个脚本“update_blog.bat”同时并发执行。我说，可以再加上一个`on file modified`语句块，不同的`on file modified`语句块可以同时并发执行。
-``` groovy
-  start to watch "E:/wenzhe/file1.md" on file modified {
-    async {
-      "E:/wenzhe/script/update_blog.bat".execute()
-    }
-    "E:/wenzhe/script/send_email.bat".execute()
-  }
-```
-他总是觉得调用脚本有点太麻烦了，因为需要他编写一个额外的脚本文件，他希望File Watcher工具能够支持直接嵌入代码。
 
-作为用例，在执行完脚本“upload_to_cloud.bat”之后，执行由用户给定的指定代码，同样可以指定工作路径，可以重定向标准输出和错误输出。这里指定了的代码，用来打印文件更新到云的时间。
-``` groovy
-  start to watch "E:/wenzhe/file1.md" on file modified { updatedFile ->
-    // 模拟用户指定的代码
-    def now = LocalDateTime.now()
-    println "file $updatedFile upload to cloud on $now"
-  }
-```
-调用命令行可以可以，如：
-``` groovy
-start to watch "E:/wenzhe/file1.md" on file modified { updatedFile ->
-  "cp $updateFile /home/wenzhe/myfolder".execute()
 }
 ```
-他又说，想要当文件创建的时候，并发调用另外一段代码判断文件是否是markdown文件，并且打印输出到文件“file1_create_stdout.log”上。我在后面加上一段 `on file created`，如下：
-``` groovy
-  start to watch "E:/wenzhe/file1.md" \
-  on file modified { updatedFile ->
-    def now = LocalDateTime.now()
-    println "file $updatedFile upload to cloud on $now"
-  } \
-  on file created { updatedFile ->
-    println "file $updatedFile created"
-    if (updatedFile.endsWith(".md")) {
-      println "this is a md file"
-    } else {
-      println "this is not a md file"
+watcher.take方法会阻塞地监听文件的变化，一旦文件变化，它会返回WatchKey对象，我们可以从中得到是哪一个文件发生了什么样的变化（创建，删除，修改）。
+
+# 响应式编程
+## 响应式的WatchService
+在take方法后面的代码，其实是对监听到文件变化的响应代码。但是，如果不熟悉WatchService的话，这种响应代码是很难识别出来的，因为它与WatchService的服务提供代码混合在一起。
+
+举个例子，如果我们要增加3个必要的过滤条件（缺一不可），都符合了才执行处理逻辑。处理逻辑执行中必须先调用某个函数，然后执行其他的用户定义的函数。代码如下所示：
+``` java
+WatchKey key = watcher.take();
+for (WatchEvent<?> event: key.pollEvents()) {  
+  Path watchablePath = (Path) key.watchable();
+  Path path = watchablePath.resolve((Path) event.context());
+  Kind<?> kind = event.kind();
+  ...
+  // 过滤，只处理abc开头的文件，或者包含“123”的文件
+  if ((isWatchDir || path.equals(event.getPath()))
+    && (event.exists() || event.isDeleted())
+    && (skipDuplicateEvent(pathLastModifiedTime, event, timeout))) {
+    // 响应处理逻辑
+    updateWatchService(watchService, event)
+    // 响应其他逻辑
+    ...
+  }
+```
+过滤逻辑和响应处理逻辑与WatchService代码紧密地耦合在一起，想一想，如果过滤条件再复杂一点，或者响应处理逻辑再复杂一点，那上面代码改起来会变得更加复杂，强耦合性会导致更加难以维护。如果要实现需求定义的复杂的条件逻辑和响应逻辑，那么很难想象代码能乱成怎样。
+
+另外，take方法是阻塞式的，如果不想阻塞，那么我们需要创建线程去调用它。引入多线程（或线程池）的代码将会变得更复杂，可读性会进一步较低。
+
+那么，有没有办法，在保持高可读性的情况下，不仅能够轻松控制阻塞与非阻塞，而且不管过滤条件多复杂，组合顺序多任意，响应逻辑多复杂以及不管有多少个不同的响应逻辑，我们代码都能够轻松灵活地应付。
+
+答案当然是肯定的，那就是采用**响应式编程**。我们可以这样来理解响应式编程：把代码分为两部分，一部分是服务提供逻辑，另一部分是定义响应逻辑。把服务提供逻辑和定义响应逻辑分开，可以更好地实现模块化，通过类似于搭积木的方式，把多个简单的步骤组合出各种复杂的逻辑，不同的组合方式可以构成不同的逻辑。
+
+对于上面WatchService的代码，基于RxJava的响应式编程是这样写的:
+``` java
+/**
+ * @author liuwenzhe2008@gmail.com
+ *
+ */
+@Value
+public class FileWatcher {
+  ...
+    // 创建被观察者对象
+    Observable.create(subscriber -> watchFile(watcher, subscriber))
+    .subscribeOn(Schedulers.io()) // 在线程池中订阅，不阻塞主线程
+  ...
+  // 定义订阅逻辑，当被观察者对象被订阅时调用
+  private void watchFile(FileWatchService watcher, Subscriber<? super FileWatchEvent> subscriber) {
+    try {
+      while (!subscriber.isUnsubscribed()) {  
+        val key = watcher.take();  
+        for (val event : key.pollEvents()) {  
+          val watchablePath = (Path) key.watchable();
+          val path = watchablePath.resolve((Path) event.context());
+
+          subscriber.onNext(new FileWatchEvent(path, event.kind()));
+        }  
+        if (key.isValid() && !key.reset()) {  
+          break;  
+        }
+      }
+      subscriber.onCompleted();
+    } catch (Throwable e) {
+      subscriber.onError(e);
     }
   }
 ```
-“对了，”他突然补充到，他还有另外一个文件夹，下面有几篇文章，也想能够更新到博客上。另外，他只关心扩展名为.md, .txt, .doc, .docx, .png, .jpg, .jpeg的文件，不需要关心其他文件和子文件夹。
-``` groovy
-  start to watch "E:/wenzhe/folder1" filter include extension (
-    "md", "txt", "doc", "docx", "png", "jpg", "jpeg"
-  ) on file modified {
-    "E:/wenzhe/script/update_blog.bat".execute()
+当被观察者被订阅的时候（当调用`Observable`的`subscribe`方法），上面的watchFile方法会被调用。而订阅者就是响应它的对象，即watchFile方法的参数`subscriber`，一个`Subscriber`类的对象。
+
+`Subscriber`是一个`RxJava`中的订阅者类，它有三个方法，`onNext`方法用于响应每个事件时回调，`onCompleted`方法用于完成所有任务时的回调，当有未处理的运行时异常抛出时`onError`方法被回调。
+
+`subscribeOn`方法可以设置订阅的线程（即执行`watchFile`方法的线程）在哪个线程池中执行，`Schedulers.io()`方法返回一个Java标准的`CacheThreadPool`，带缓存的线程池。这样轻松可以解决take方法阻塞的问题。如果想要阻塞的话，只需把这条语句去掉即可，简单吧！
+
+现在，每次有文件更新都会触发订阅者`subscriber`的`onNext`方法，那是否要处理（取决于过滤条件），怎么处理，就不用WatchService代码操心了，交给后续的订阅者逻辑就行了。
+
+比如，当
+``` java
+  Observable.create(subscriber -> watchFile(watcher, subscriber))
+    .subscribeOn(Schedulers.io())
+    .filter(event -> isWatchDir || path.equals(event.getPath()))
+    .filter(event -> event.exists() || event.isDeleted())
+    .filter(event -> skipDuplicateEvent(pathLastModifiedTime, event, timeout))
+    .doOnNext(event -> updateWatchService(watchService, event))
+    .doAfterTerminate(() -> watchService.close());
+```
+
+我们增加了一些很有用的过滤条件，以及定义了回调，只需在`Observable`后面加上不同的`filter`，`doOnNext`, `doAfterTerminate`，用链式组合的方式，非常灵活。
+
+保证可读性也容易，通过代码很容易理解其中的逻辑。下面根据响应链条，依次分析每个响应节点的逻辑：
+
+第一个条件，如果观察的是文件夹则通过，否则（指观察文件而非文件夹）只有被观察文件自己更新了才能通过，这是解决`WatchService`不能观察普通文件的解决方案，即如果路径为文件夹则直接监控，否则监控其父目录，然后通过过滤去掉其他兄弟的更新事件，从而实现对普通文件的监控。下面的Java代码描述了这种策略。
+``` java
+    val isWatchDir = Files.isDirectory(path);
+    val pathToWatch = isWatchDir ? path : path.getParent();
+```
+第二个条件是更新的文件要么存在，要么就是删除事件（删除事件收到时文件已经不存在了）。
+
+第三个条件是忽略重复事件，一个事件发生后，`timeout`时间内的相同事件将会被忽略掉，解决了WatchService的抖动问题。
+
+`pathLastModifiedTime`定义为一个缓存，类似一个Map，key为文件路径，value为记录WatchService事件接收的时间。这个缓存采用Guava提供的超时缓存，即如果写完后timeout时间内没有被访问，会自动从缓存中清除该记录。
+``` java
+    long timeout = 1500; // ms
+    Cache<Path, Long> pathLastModifiedTime = CacheBuilder.newBuilder()
+        .expireAfterWrite(timeout, TimeUnit.MILLISECONDS)
+        .build();
+```
+忽略重复事件的代码逻辑如下：
+``` java
+  /**
+   * fix Java's watch service issue that modify file event will send 2 to 3 times
+   */
+  private boolean skipDuplicateEvent(Cache<Path, Long> pathLastModifiedTimeCache, 
+      FileWatchEvent event, long periodInMilliSecond) {
+
+    if (event.isModified() && event.isFile()) {
+      val path = event.getPath();
+      val now = System.currentTimeMillis();
+      synchronized (this) {
+        val lastModifiedTime = pathLastModifiedTimeCache.getIfPresent(path);
+        if (lastModifiedTime == null || now - lastModifiedTime > periodInMilliSecond) {
+          pathLastModifiedTimeCache.put(path, now);
+          return true;
+        } else {
+          return false;
+        }
+      }
+    } else {
+      return true;
+    }
   }
 ```
-他接着又想想，如果是上班时间，就不要更新博客了，以免让领导知道他不务正业。他的上班时间是每周一到周五的9点到18点。
-``` groovy
-  def isWorkTime = {dateTime ->
-    def dayOfWeek = dateTime.getDayOfWeek()
-    int hour = dateTime.getHour()
-    return hour >= 9 && hour < 18 &&
-      [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, 
-       DayOfWeek.THURSDAY, DayOfWeek.FRIDAY
-      ].contains(dayOfWeek)
+回到响应式编程代码，`doOnNext`是响应订阅者`onNext`的响应逻辑，这里调用的是更新WatchService，即当有新的文件夹创建时注册到WatchService中，当有老文件夹删除时，在WatchService中取消对该文件夹的监听。
+``` java
+  private void updateWatchService(final FileWatchService watchService, FileWatchEvent event) {
+    if (event.isCreated() && event.isDirectory()) {
+      watchService.register(event.getPath());
+    } else if (event.isDeleted() && !event.exists()) {
+      watchService.cancel(event.getPath());
+    }
   }
+```
+`doAfterTerminate`是当观察者逻辑成功结束或者遇到错误时，即`onCompleted`或者`onError`时响应的逻辑，它类似于Java中的`finally`语句。这里是关闭`WatchService`服务，有了这个结束时响应逻辑，妈妈再也不要担心服务忘记关闭了！^_^
+
+且不考虑用户在DSL中定义的过滤器和响应逻辑，以上这些过滤和响应逻辑是作为File Watcher基本功能必备的逻辑，我们作为底层代码给出基于响应式编程的`FileWatcher`类的实现：
+``` java
+package org.wenzhe.filewatcher;
+
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+
+import lombok.SneakyThrows;
+import lombok.Value;
+import lombok.val;
+import rx.Observable;
+import rx.Subscriber;
+import rx.schedulers.Schedulers;
+
+/**
+ * @author liuwenzhe2008@gmail.com
+ *
+ */
+@Value
+public class FileWatcher {
+
+  Path path;
+  boolean recursively;
   
-  start to watch "E:/wenzhe/folder1" filter include extension (
-    ".md", ".txt", ".doc", ".docx", ".png", ".jpg", ".jpeg"
-  ) filter include when { updatedFile, updatedType ->
-    !isWorkTime(LocalDateTime.now())
-  } on file modified {
-    "E:/wenzhe/script/update_blog.bat".execute()
+  /**
+   * include the root path itself
+   */
+  private static List<Path> listDirsRecursively(Path path) throws IOException {
+    List<Path> dirsToWatch = new ArrayList<>(); 
+    Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+
+      @Override
+      public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+        dirsToWatch.add(dir);
+        return FileVisitResult.CONTINUE;
+      }
+    });
+    return dirsToWatch;
   }
-```
-另外，他又补充到，还有另一个文件夹，它的某些文件夹也包含了这些需要更新的文件，需要递归的监控和过滤；但是不需要监控文件夹名字为target, bin, .settings的那些文件夹。我把`start to`改成`start recursively`。
-``` groovy
-  start recursively watch "E:/wenzhe/folder1" \
-  filter include extension (
-    "md", "txt", "doc", "docx", "png", "jpg", "jpeg"
-  ) filter exclude folder name equalsTo "target", "bin", ".settings" \
-  on file modified {
-    "E:/wenzhe/script/update_blog.bat".execute()
+
+  @SneakyThrows
+  public Observable<FileWatchEvent> asObservable() {
+    if (!Files.exists(path)) {
+      throw new FileWatcherException("not exist path " + path);
+    }
+    
+    long timeout = 1500; // ms
+    Cache<Path, Long> pathLastModifiedTime = CacheBuilder.newBuilder()
+        .expireAfterWrite(timeout, TimeUnit.MILLISECONDS)
+        .build();
+    
+    val isWatchDir = Files.isDirectory(path);
+    val pathToWatch = isWatchDir ? path : path.getParent();
+ 
+    val obsvPath = isWatchDir && recursively ? 
+        Observable.from(listDirsRecursively(pathToWatch)) : Observable.just(pathToWatch);
+    
+    val watchService = new FileWatchService();
+
+    return obsvPath.reduce(watchService, (watcher, path) -> watcher.register(path))
+    .flatMap(watcher -> 
+      Observable.create(subscriber -> watchFile(watcher, subscriber))
+      .subscribeOn(Schedulers.io())
+      .cast(FileWatchEvent.class)
+    )
+    .filter(event -> isWatchDir || path.equals(event.getPath()))
+    .filter(event -> event.exists() || event.isDeleted())
+    .filter(event -> skipDuplicateEvent(pathLastModifiedTime, event, timeout))
+    .doOnNext(event -> updateWatchService(watchService, event))
+    .doAfterTerminate(() -> watchService.close());
   }
-```
-另外，有些特殊的.txt，的文件也不需要监控，这些特殊的文件都是不同系统生成的日志文件，以年月日命名，但规则比较复杂，先看看例子：
-```
-2016.07.09.txt
-2016.7.9.txt
-2016.7.09.txt
-```
-总结起来就是显示年月日，年为4个数字，月和日为1到2个数字，第一个数字如果是0可以省略。规则比较复杂，我用正则表达式描述为 `\d{4}\.\d?\d\.\d?\d`
-``` groovy
- start recursively watch "E:/wenzhe/folder1" \
-  filter include extension (
-    "md", "txt", "doc", "docx", "png", "jpg", "jpeg"
-  ) filter exclude folder name equalsTo "target", "bin", ".settings" \
-  filter exclude file name matches "\\d{4}\\.\\d?\\d\\.\\d?\\d" \
-  on file modified {
-   "E:/wenzhe/script/update_blog.bat".execute()
+
+  private void updateWatchService(final FileWatchService watchService, FileWatchEvent event) {
+    if (event.isCreated() && event.isDirectory()) {
+      watchService.register(event.getPath());
+    } else if (event.isDeleted() && !event.exists()) {
+      watchService.cancel(event.getPath());
+    }
   }
-```
-然后他有想要加上很多其他的过滤规则，比如只是想监控文件名为wenzhe和java开头的文件，不监控目录名为test或DSL结尾（大小写不敏感）的目录，不监控目录路径包含src/test或者src/main/resources的目录。
 
-规则很复杂，我还是可以把它用英文记录下来，如下所示：
-``` groovy
-  start recursively watch "E:/wenzhe/folder1" \
-  filter include extension (
-    "md", "txt", "doc", "docx", "png", "jpg", "jpeg"
-  ) filter exclude folder name equalsTo "target", "bin", ".settings" \
-  filter exclude file name matches "\\d{4}\\.\\d?\\d\\.\\d?\\d" \
-  filter include file name startsWith "wenzhe", "java" \
-  filter exclude folder name cases insensitive endsWith "test", "DSL" \
-  filter exclude folder path contains "src/test", "src/main/resources" \
-  on file and folder modified {
-    "E:/wenzhe/script/update_blog.bat".execute()
+  /**
+   * fix Java's watch service issue that modify file event will send 2 to 3 times
+   */
+  private boolean skipDuplicateEvent(Cache<Path, Long> pathLastModifiedTimeCache, 
+      FileWatchEvent event, long periodInMilliSecond) {
+
+    if (event.isModified() && event.isFile()) {
+      val path = event.getPath();
+      val now = System.currentTimeMillis();
+      synchronized (this) {
+        val lastModifiedTime = pathLastModifiedTimeCache.getIfPresent(path);
+        if (lastModifiedTime == null || now - lastModifiedTime > periodInMilliSecond) {
+          pathLastModifiedTimeCache.put(path, now);
+          return true;
+        } else {
+          return false;
+        }
+      }
+    } else {
+      return true;
+    }
   }
+
+  private void watchFile(FileWatchService watcher, Subscriber<? super FileWatchEvent> subscriber) {
+    try {
+      while (!subscriber.isUnsubscribed()) {  
+        val key = watcher.take();  
+        for (val event : key.pollEvents()) {  
+          val watchablePath = (Path) key.watchable();
+          val path = watchablePath.resolve((Path) event.context());
+
+          subscriber.onNext(new FileWatchEvent(path, event.kind()));
+        }  
+        if (key.isValid() && !key.reset()) {  
+          break;  
+        }
+      }
+      subscriber.onCompleted();
+    } catch (Throwable e) {
+      subscriber.onError(e);
+    }
+  }
+}
 ```
-看了看上面的“英文”记录，他意识到规则越来越复杂，问我是不是太苛刻了，能不能实现，同时要给他提供一个容易灵活配置的文件或者操作界面。
-
-我问他，上面的“英语”是否容易理解？是否足够可以反映他复杂的需求？如果他的需求变化了，他是否自己可以修改上面的“英语”来描述他的新需求？
-
-他说：“当然没问题，上面只是英文描述而已。虽说不才，哥也学过几年英语，不仅看得懂，而且修改也没问题。”
-
-“那很好，”我说，“那我就让这对英文描述-- 飞 -- 起来！”
-
-“什么？”他问道，带着一脸的不解。
-
-我解释说，上面的“英语”也是可以直接运行的，而且会按照他期望的方式，他大吃一惊，惊叹现代化计算机如此智能，上面的英文描述不正就是他想要的那个容易灵活配置的用户操作界面吗？
-
-# DSL-UDD
-在跟用户交流中，我们不谈抽象的领域概念，而是聚焦到具体的用例上。通过构造出一个又一个具体的用例，来逐步理解抽象的需求。通过一个又一个的用例，来驱动软件开发，这就是“用例驱动开发”。
-
-其实，上面的“英文”是一段DSL代码（领域驱动语言），描述了用户需要的具体场景。所谓的“领域驱动语言”，说白了，就是DIY,自创出来的语言。
-
-在交流过程中，我换位思考，站在用户的角度，倾听用户的声音；然后反馈，按照我的理解，用DSL记录下来；然后用户通过DSL了解我的理解程度，并作出修正或补充；然后我再修改DSL描述，如此循环。在这个不断地“记录-反馈-记录”过程中，我们会可能会发现对方的某些想法片面，从而可以不断修正补充，并且想到更多用例丰富需求，这样一来，DSL不仅成为交流估计、共通语言、具体的用例需求文档，而且也成为日后软件开发设计的驱动源泉。我把这种模式，赋予一个名字“DSL用例驱动开发”，简称DSL-UDD（wenzhe本人原创）。
-
-根据不同的业务需求，采用用户与开发者都能理解的共同语言记录下来，这样方便沟通和反馈。当以后需求越来越复杂时，这种共通的语言（也就是DSL）也会随之发展来描述新的需求。领域驱动设计（DDD）提倡定义共通的词汇以方便交流，这一点，我们可以在DSL层面上实现。除了能提供共通词汇，DSL还描述共通的动作，因为DSL就是用户与开发者约定的共通的特定语言。
-
-用DSL描述需求，不仅方便沟通和反馈，而且当产品发布出去之后，如果DSL也提供给用户，那么，当用户有一些简单的需求变更，直接修改DSL的描述就行，不需要开发者再改代码后提供新的build。可以说，DSL在产品发布后，能够极大地方便用户定制更具体的需求，而无需开发者参与。我把这点称作DSL的动态属性，这些提供给用户使用的DSL成为“动态DSL”，因为用户可以动态修改DSL，而无需编译。
-
-当然，并不是说所有产品都会给用户提供DSL，这仍然取决于用户的需要。如果用户不需要，采用DSL仍然是非常有用和值得推荐的。
-
-用DSL，对代码可读性和可维护性，是很有帮助的。DSL用例驱动开发（DSL-UDD），就是把需求文档通过构造一个又一个的具体用例，转换为一个又一个的DSL描述，从中抽象出DSL的语法和语义，而软件的功能实现，就转换为对DSL提供底层支持的驱动代码。从代码的设计层面上讲，就是把业务需求变化紧密相关的业务层代码，转移到DSL上去，而其他代码成为支持DSL的驱动代码，与业务需求隔离开，受业务需求变更的影响就大大减小，我把这些代码成为DSL的驱动代码，简称驱动层。
-
-当DSL随之业务发展不断丰富时，当有些新的业务到来或者原有的需求变更了，如果现有的DSL足以描述新的需求，那么只需要在DSL层上做调整，而无需修改驱动层代码。
-
-只有当现有的DSL不足以描述新需求时，增加驱动层代码，扩展DSL。
-而如果没有业务需求，但有非功能需求时，比如想改进设计，提高性能，则无需修改DSL层，只需确保驱动层接口不变的情况下，改进驱动层实现代码。
-
-好了，很多读者会疑惑，说了这么多，上面那段“英语”是怎么“飞”（运行）起来的呢？
-
-# DSL分类
-## 内部DSL和外部DSL
-业界一般按照DSL的实现方式，把DSL分为内部DSL和外部DSL。
-
-内部DSL指的是通过某种通用的编程语言（称为宿主语言）的语法编写出来的DSL，该DSL语法受制于宿主语言的语法，但不需要额外的规则去解析。这种方式简单而且强大，因为它就是宿主语言本身。能够提供内部DSL的宿主语言有很多，最优秀的DSL宿主语言包括Groovy和Scala等。当然Java也可以，只是多了些噪声。内部DSL的一个优秀范例是Gradle（作为编译脚本广泛用于大量Java，Groovy项目，经典用例是Android的编译脚本采用Gradle编写），其宿主语言就是Groovy；另一个优秀范例是Web框架Grails，与经典的SSH框架相比Grails简化配置，提供开发效率；另外logback的groovy配置文件也是一个例子。
-
-外部DSL是自己实现的新语言，不受任何限制，但工作量大（毕竟是要开发一种新语言），需要文本解析，构造抽象语法树。XML可以认为是一种外部DSL，虽然容易解析，但XML的结构制作太多冗余的噪声，影响可读性，而且不适合描述一下流程结构，如if，else，loop等。目前有一些库能不帮助开发者简化外部DSL，如Antlr库。
-
-对于本文要开发的软件，目前内部DSL的表现力以及足够满足需求，不需要外部DSL。
-
-## 动态DSL和静态DSL
-### 动态DSL
-前面提过，如果用户需要，我们可以向用户提供DSL以方便用户配置，我把这类DSL称为“动态DSL”。用户可以在运行时编辑DSL脚本，不需要重新编译（甚至不需要重启，如本文介绍的File Watcher工具）。一般采用外部DSL（如XML）或者支持动态编译执行的内部DSL（如Groovy）。由于Scala属于静态编译语言，无法提供动态DSL。
-
-### 静态DSL
-前文也说过，如果用户不需要，代码内部使用DSL也能带来很大的好处。
-
-最好是静态编译语言，这样可以利用编译器检查语法。最好与产品其他代码保持同一种语言。一个产品中拥有统一的主流语言，可以减少团队开发者学习难度，减少招聘难度，也容易使代码更容易维护，IDE也能更好地使用，比如重构。可以支持静态DSL的语言，包括Java和Scala。
-
-我对选择动态DSL还是静态DSL的建议是：能用静态DSL的就尽量用静态DSL，除了提供给用户动态修改的部分采用动态DSL外，其他采用静态DSL。
-
-平衡各自的优缺点，本工具File Watcher的设计采用了动态DSL加静态DSL相结合的方式。考虑到给用户提供一个方便灵活的操作接口（定义为扩展名为fw的文件，下文称为fw脚本），给用户提供了基于Groovy的动态DSL，程序内部实现采用基于Java的静态DSL。
-
-限制Groovy的使用范围，代码中没有使用Groovy的代码，只有一个类用于调用fw脚本，需要依赖于Groovy类库，但仍然采用Java编写，因此程序中只有一种语言，就是Java。
-
-# 需求描述与技术实现细节分离
-DSL描述了需求，但如何实现则取决于技术实现层面。尽管内部DSL中宿主语言可以直接执行复杂的过程，但如果直接与技术实现细节强耦合，即不利于适应需要的变化，也限制了技术的选择。
-
-本文提出的DSL（需求描述）与技术实现细节分离，类似于面向接口编程中的接口与实现类之间的关系。DSL相当于定义接口，而技术实现细节是实现类。如果需求变化，我们只需要修改DSL即可，无需更改实现代码，除非现有实现代码满足不了新的需求；如果调整技术实现细节，也无需修改DSL定义。
-# Builder模式
-如何做到DSL（需求描述）与实现细节分离，可以采用Builder模式，即执行DSL时，并不真正执行，而是把所有的DSL需求记录起来，并且在需要的时候，指导真正代码的执行。这有点类似于解析一个XML配置文件，记录起来，然后在需要的时候取出来执行。
-
-# Groovy DSL
-先创建一个Groovy工程org.wenzhe.grv，用来做实验，采用实验驱动开发（EDD，wenzhe本人自创，见另一篇文章），来一步步支持DSL。
-
-新建一个Groovy脚本filewatcher1.groovy，用来做实验，编写DSL，用来驱动开发DSL驱动层代码。代码如下：
+`FileWatcher`类是本项目File Watcher核心库的核心实现，它是一个响应式风格的、更加强大和完善的、改善Java 7 `WatchService`的类，其主要逻辑都再于`asObservable`方法中，通过返回`Observable<FileWatchEvent>`的方式，响应式地提供给被调用者。
+## 响应式地实现用户DSL中描述的复杂逻辑
+假设用户的需求描述（定义在fw文件这个DSL中）如下：
 ``` groovy
-package org.wenzhe.grv
-
-import org.wenzhe.filewatcher.FileWatcherExecutor
-
-FileWatcherExecutor.execute { fwctx -> fwctx.with {
-  
   start recursively watch "E:/wenzhe/aa" \
   filter include extension (
     "txt"
@@ -252,22 +437,59 @@ FileWatcherExecutor.execute { fwctx -> fwctx.with {
     println "open notepad"
     "notepad '$updatedFile'".execute()
   }
-  
-  start to watch "E:/wenzhe/bb" \
-  on file and folder updated { updatedFile, updatedType ->
-    println "file $updatedFile $updatedType"
-  }
-  
-}}
-
-while (true) {
-  
-}
 ```
-可以看到DSL定义在Groovy文件中。下面根据上面的DSL定义，创建Java工程org.wenzhe.filewatcher，用来编写File WatcherDSL的驱动层代码和技术实现代码。
-
-`FileWatcherExecutor`是用来解析DSL，并且执行DSL描述的业务逻辑。
+下面看看如何利用`FileWatcher`类提供的响应式方法`asObservable`，实现用户DSL需求描述的复杂逻辑。如下代码所示：
 ``` java
+    Observable<FileWatchEvent> fwe = new FileWatcher(
+        Paths.get(watcher.getWatchedFile()), watcher.isRecursively())
+    .asObservable()
+    .filter(evt -> includeFilters.isEmpty() 
+        || includeFilters.stream().anyMatch(filter -> matchFilter(evt, filter)))
+    .filter(evt -> !excludeFilters.stream().anyMatch(filter -> matchFilter(evt, filter)));
+    
+    for (val handler : watcher.getHandlers()) {
+      fwe = fwe.doOnNext(evt -> {
+        if (isFileTypeMatch(evt, handler.getFileTypes())
+            && handler.getUpdateType().match(evt)) {
+          handler.getCode().call(evt.getPath().toString(), 
+             UpdateType.from(evt).toString().toLowerCase());
+        }
+      });
+    }
+```
+上面代码中`watcher`变量为记录DSL中描述的一个`watch`语句块，它包含用户想要监控的文件（夹）路径，0个到多个的过滤条件（上面代码中的`includeFilters`和`excludeFilters`），另外还有1个到多个的响应处理逻辑（`DSL`中的`on`语句）。
+
+不管用户描述的逻辑有多复杂，上面简单的几行代码就可以轻松应付之，而且仍然保持很好的可读性和灵活可组合性，即使需要更改逻辑或者扩展逻辑，都只是改变或增加链式响应式处理组合而已，可见响应式编程思维的强大之处。
+
+下面还是根据响应链条，依次分析每个响应节点的逻辑：
+
+第一个响应式过滤器`filter`是处理DSL中`include`语句的，如果没有定义`include`或者符合其中任意一个条件的响应事件都能够通过，否则被排斥在外。
+
+第二个`filter`是处理DSL中`exclude`语句的，符合任何一个条件的响应事件都不能通过。
+
+通过前面两个过滤器的响应事件，会进入到下个响应处理环节。遍历用户定义的每个处理方法（即on语句），通过`doOnNext`响应，响应逻辑中通过函数式调用用户定义的函数，如果同时符合文件类型匹配和事件更新类型匹配的话。
+
+上面的代码都是定义在类`FileWatcherExecutor`中，它作为用户DSL的真正执行器来运行。下面是它的Java代码：
+``` java
+package org.wenzhe.filewatcher;
+
+import static java.util.stream.Collectors.partitioningBy;
+
+import java.nio.file.Paths;
+import java.util.List;
+
+import org.wenzhe.filewatcher.dsl.FileType;
+import org.wenzhe.filewatcher.dsl.FileWatcherDslContext;
+import org.wenzhe.filewatcher.dsl.Filter;
+import org.wenzhe.filewatcher.dsl.FilterType;
+import org.wenzhe.filewatcher.dsl.UpdateType;
+import org.wenzhe.filewatcher.dsl.Watcher;
+
+import lombok.val;
+import rx.Observable;
+import rx.Subscription;
+import rx.functions.Action1;
+
 /**
  * @author liuwenzhe2008@gmail.com
  *
@@ -279,198 +501,99 @@ public class FileWatcherExecutor {
   }
   
   public static Observable<FileWatchEvent> run(Action1<FileWatcherDslContext> dslContextInitializer) {
-    val ctx = new FileWatcherDslContext();  // 创建DSL上下文对象（即Builder对象）
-    dslContextInitializer.call(ctx);        // 初始化DSL上下文对象（运行DSL从而完善Builder对象）
-    return run(ctx);                          // 通过Builder，执行技术实现细节
-  }
-```
-`FileWatcherExecutor` 的代码可以看到整个DSL解析执行过程，见上面的注释，即先创建DSL上下文对象（即Builder对象），再始化DSL上下文对象（运行DSL从而完善Builder对象），最后通过Builder，执行技术实现细节。
-  
-再回到Groovy代码第5行，`FileWatcherExecutor.execute`方法接收一个函数，其参数为`FileWatcherDslContext`类，这个类作为收集所有的DSL需求描述，相当于Builder。函数参数`fwctx` 就是`FileWatcherDslContext`类的对象。
-
-主要到Groovy的`with`关键字，它把fwctx对象隐藏，在`with`语句块中出现的方法和域来着fwctx对象，但我们不用写。比如第7行的start，它其实是fwctx对象（`FileWatcherDslContext`类）的`start`方法，如果没有`with`语句块，自必须写成：
-``` java
-fwctx.start
-```
-Groovy代码第7行的`recursively`是`FileWatcherDslContext`类定义的公有静态成员常量（with语句块了可以省略fwctx）。
-
-下面是FileWatcherDslContext.java的代码：
-``` java
-/**
- * @author liuwenzhe2008@gmail.com
- *
- */
-@Slf4j
-@Getter
-public class FileWatcherDslContext {
-      
-  public static final boolean recursively = true;
-  public static final boolean to = !recursively;
-  
-  public static final FileType file = FileType.FILE;
-  public static final FileType folder = FileType.FOLDER;
-  public static final FilterType include = FilterType.INCLUDE;
-  public static final FilterType exclude = FilterType.EXCLUDE;
-  public static final NamePath name = NamePath.NAME;
-  public static final NamePath path = NamePath.PATH;
-  
-  public static final boolean sensitive = false;
-  public static final boolean insensitive = !sensitive;
-
-  private final List<Watcher> watchers = new ArrayList<>();
-  
-  public Watcher start(boolean recursively) {
-    if (log.isDebugEnabled()) {
-      log.debug("start {}to", recursively ? "recursively " : "");
-    }
-    val w = new Watcher();
-    w.setRecursively(recursively);
-    w.setStart(true);
-    watchers.add(w);
-    return w;
+    val ctx = new FileWatcherDslContext();
+    dslContextInitializer.call(ctx);
+    return run(ctx);
   }
   
-  public Watcher stop(boolean to) {
-    log.debug("stop to");
-    val w = new Watcher();
-    w.setStart(false);
-    watchers.add(w);
-    return w;
+  public static Observable<FileWatchEvent> run(FileWatcherDslContext ctx) {
+    return Observable.from(ctx.getWatchers())
+    .filter(watcher -> watcher.isStart())
+    .flatMap(FileWatcherExecutor::run);
   }
   
-  public static Subscription async(Action0 action) {
-    return Schedulers.io().createWorker().schedule(action);
-  }
-}
-```
-由于Groovy的函数调用可以省略小括号，因此DSL中的 start recursively 其实可以相当于：
-``` java
-  fwctx.start(recursively)
-```
-其中，recursively从类FileWatcherDslContext中静态导入。
-同理，stop to 相当于：
-``` java
-  fwctx.stop(to)
-```
-从代码可看到，`start`方法返回`Watcher`对象，`Watcher`有`watch`方法，接受一个`String`的`path`。如下：
-``` java
-package org.wenzhe.filewatcher.dsl;
-
-import java.util.ArrayList;
-import java.util.List;
-
-import lombok.Data;
-import lombok.Getter;
-import lombok.val;
-import lombok.extern.slf4j.Slf4j;
-
-/**
- * @author liuwenzhe2008@gmail.com
- *
- */
-@Slf4j
-@Data
-public class Watcher {
-  
-  private boolean start;
-  private boolean recursively;
-  private String watchedFile = "";
-  
-  @Getter private final List<Handler> handlers = new ArrayList<>();
-  @Getter private final List<Filter> filters = new ArrayList<>();
-  
-  public Watcher watch(String path) {
-    log.debug("watch {}", path);
-    watchedFile = path;
-    return this;
-  }
-  
-  public Handler on(FileType fileType) {
-    log.debug("on {}", fileType);
-    val handler = new Handler(this, fileType);
-    handlers.add(handler);
-    return handler;
-  }
-  
-  public Filter filter(FilterType filterType) {
-    log.debug("filter {}", filterType);
-    val ft = new Filter(this, filterType);
-    filters.add(ft);
-    return ft;
-  }
-}
-```
-所以，如果不省略点和括号的话，start recursively watch "E:/wenzhe/aa"  就是
-``` java
-fwctx.start(recursively).watch("E:/wenzhe/aa")
-```
-类似的，我们编写了更多的Java代码来支持DSL。由于篇幅关系，这里不做详细介绍，下图显示的是所有的DSL驱动代码文件名，都在`org.wenzhe.filewatcher.dsl`包中：
-
-![DSL driver package](http://img.blog.csdn.net/20160812234221890)
-
-
-# Java DSL
-由于DSL驱动代码采用Java编写，使用它们并不需要Groovy，用Java统一可以编写DSL。如果用Java DSL表达，可读写同样也很好，只是稍微多了些噪声（点和括号），如下所示：
-``` java
-    FileWatcherExecutor.execute(ctx -> {
-
-      ctx.start(recursively).watch("E:/wenzhe/aa")
-      .filter(include).extension("txt")
-      .filter(exclude).file(name).contains("123")
-      .on(file).modified(updatedFile ->
-        async(() -> {
-          System.out.printf("file %s modifieddddd\n", updatedFile);
-        })
-      )
-      .on(file).modified(updatedFile -> {
-        System.out.println("open notepad");
-        try {
-          Runtime.getRuntime().exec(String.format("notepad '%s'", updatedFile));
-        } catch (Exception e) {
-          e.printStackTrace();
+  public static Observable<FileWatchEvent> run(Watcher watcher) {
+    val groupedFilters = watcher.getFilters().stream()
+    .collect(partitioningBy(filter -> filter.getFilterType() == FilterType.INCLUDE));
+    val includeFilters = groupedFilters.get(true);
+    val excludeFilters = groupedFilters.get(false);
+    
+    Observable<FileWatchEvent> fwe = new FileWatcher(
+        Paths.get(watcher.getWatchedFile()), watcher.isRecursively())
+    .asObservable()
+    .filter(evt -> includeFilters.isEmpty() 
+        || includeFilters.stream().anyMatch(filter -> matchFilter(evt, filter)))
+    .filter(evt -> !excludeFilters.stream().anyMatch(filter -> matchFilter(evt, filter)));
+    
+    for (val handler : watcher.getHandlers()) {
+      fwe = fwe.doOnNext(evt -> {
+        if (isFileTypeMatch(evt, handler.getFileTypes())
+            && handler.getUpdateType().match(evt)) {
+          handler.getCode().call(evt.getPath().toString(), 
+             UpdateType.from(evt).toString().toLowerCase());
         }
       });
-      
-      ctx.start(to).watch("E:/wenzhe/bb")
-      .on(file).and(folder).updated((updatedFile, updatedType) -> {
-        System.out.printf("file %s %s\n", updatedFile, updatedType);
-      });
-    });
-    
-    while (true) {
-      
     }
-```
-Java DSL可读性也相当好，当把File Watcher作为一个轻量级Java第三方库时可以作为API使用。
-
-我们把工程org.wenzhe.filewatcher作为一个通用的Java库，它不依赖于Groovy，只是提供DSL的支持，以及底层的技术实现逻辑（后文会介绍）。
-
-# fw文件
-File Watcher作为一个工具，或者作为一种语言，用户可以编写DSL代码，并且动态执行，我们采用了Groovy。
-
-新建Java工程org.wenzhe.filewatcher.app，它仍然是Java工程，但以普通jar包的方式第三方依赖于Groovy运行时库，这样，用户编写的DSL代码就可以动态执行了。
-
-用户可以编写以fw为后缀名的DSL文件 test1.fw，（我们称为fw文件，这种语言称为fw语言），如下：
-``` groovy
-  start recursively watch "E:/wenzhe/aa" \
-  filter include extension (
-    "txt"
-  ) filter exclude file name contains "123" \
-  on file modified { updatedFile ->
-    async {
-      println "file $updatedFile modifieddddd"
-    }
-  } on file modified { updatedFile ->
-    println "open notepad"
-    "notepad '$updatedFile'".execute()
+    return fwe;
   }
   
-  start to watch "E:/wenzhe/bb" \
-  on file and folder updated { updatedFile, updatedType ->
-    println "file $updatedFile $updatedType"
+  private static boolean matchFilter(FileWatchEvent evt, Filter filter) {
+    return isFileTypeMatch(evt, filter.getFileTypes()) && filter.filter(evt);
+  }
+
+  private static boolean isFileTypeMatch(FileWatchEvent evt, List<FileType> fileTypes) {
+    return (evt.isFile() && fileTypes.contains(FileType.FILE))
+        || (evt.isDirectory() && fileTypes.contains(FileType.FOLDER))
+        || evt.isDeleted();
+  }
+}
+```
+上面的代码中，主要到另一个FileWatcherExecutor.run方法的重载：
+``` java
+  public static Observable<FileWatchEvent> run(FileWatcherDslContext ctx) {
+    return Observable.from(ctx.getWatchers())
+    .filter(watcher -> watcher.isStart())
+    .flatMap(FileWatcherExecutor::run);
   }
 ```
-Java代码调用Groovy库的`GroovyShell`类来执行fw文件，生成`FileWatcherDslContext`对象，如下FileWatcherDslRunner.java代码所示：
+获取watchers，通过过滤筛选出isStart的，然后调用另一个run重载（前文已介绍过）。
+
+## 响应式获取输入--DSL描述的需求
+File Watcher工具软件允许用户提供一个文件或文件夹路径作为程序的运行参数，命令行为：`java -jar filewatcher.jar [fw_file_path]`。
+
+作为程序参数的路径信息，当然是`String`类型的，我们把它作为一个输入，一个待处理者，或者说一个被观察者，于是可以通过RxJava的Observable.just方法转换为Observable对象，然后就可以使用响应式编程思想，通过链式响应处理，直至获取整个DSL需求记录起来，进而调用上一节的执行逻辑来响应记录的结果从而完成整个用户需求的执行。如下代码所示：
+``` java
+  public void start() {
+    subscription = Observable.just(path)
+        .map(strPath -> Paths.get(strPath).toAbsolutePath())
+        .flatMap(FileWatcherDslRunner::getDslContexts)
+        .flatMap(FileWatcherExecutor::run)
+        .subscribe(this::onNext, this::onError);
+  }
+```
+第3行的map方法把Observable里的String转换为Path，然后交由后面响应处理。这很像Java 8中函数式编程中的`map`。
+
+第4行的`flatMap`方法是把`Path`对象转换成另一个`Observable`对象(与Java 8中`flatMap`相似），`FileWatcherDslRunner::getDslContexts`是用来执行`Path`对象（定义`DSL`的文件或文件夹），得到`FileWatcherDslContext`对象来记录所有的需求。这一点将在本节后续详细介绍。
+
+接下来的`flatMap`根据输入的`FileWatcherDslContext`，执行`WatchService`逻辑，返回文件变化的事件`FileWatchEvent`的被观察者`Obserable<FileWatchEvent>`，这一点在上一小节以及介绍过了。
+
+RxJava中的`Observable`中定义的逻辑都是懒惰的，只有被订阅（调用`subscribe`方法）才会执行。这一特性跟Java 8函数式编程中的流Stream很像。
+
+上面代码中，`subscribe(this::onNext, this::onError)`，订阅观察者，只有订阅了，响应处理逻辑才会真正执行。
+
+`subscribe`方法参数中，`onNext`方法是每次有`FileWatchEvent`的时候被调用，`onError`是出错时调用。
+
+这里的订阅在响应式编程里称为**冷订阅**，因为只有被订阅者订阅了才会发事件；与之不同的是**热订阅**，不管有没有被订阅，都会发事件，本项目中没有用到，因此本文不做阐述，有兴趣的读者可阅读相关文献。
+
+可以看到，subscribe方法返回订阅者Subscription对象，我们用成员变量subscription来接收。调用订阅者subscription的取消订阅方法unsubscribe，即可停止监听事件。见如下的代码：
+``` java
+  private void stop() {
+    if (subscription != null) {
+      subscription.unsubscribe();
+    }
+  }
+```
+下面看看FileWatcherDslRunner::getDslContexts方法是如何解析DSL并记录起来的，先看看代码：
 ``` java
 /**
  * @author liuwenzhe2008@gmail.com
@@ -490,44 +613,41 @@ public class FileWatcherDslRunner {
     dslScript.run();
     return context;
   }
-```
-下面的Java DSL代码，过滤出文件名后缀为fw的文件，当fw文件创建、修改和删除时，调用`onUpdateDsl`方法。
-``` java
-package org.wenzhe.filewatcher.app;
-
-import static org.wenzhe.filewatcher.dsl.FileWatcherDslContext.file;
-import static org.wenzhe.filewatcher.dsl.FileWatcherDslContext.include;
-import static org.wenzhe.filewatcher.dsl.FileWatcherDslContext.name;
-import static org.wenzhe.filewatcher.dsl.FileWatcherDslContext.to;
-
-import org.wenzhe.filewatcher.FileWatcherExecutor;
-
-import rx.functions.Action1;
-
-/**
- * @author liuwenzhe2008@gmail.com
- *
- */
-public class DslWatcher {
-
-  public static void watch(String dslPath, Action1<String> onUpdateDsl) {
-    FileWatcherExecutor.execute(context -> context
-    
-      .start(to).watch(dslPath)
-      .filter(include).file(name).extension("fw")
-      .on(file).modified(onUpdateDsl)
-      .on(file).deleted(onUpdateDsl)
-    );
+  
+  @SneakyThrows
+  private static Observable<Path> getDslFiles(Path folder, int maxDepth) {
+    try (val stream = Files.walk(folder, maxDepth)) {
+      return Observable.from(
+          stream.filter(Files::isRegularFile)
+          .filter(path -> path.toString().endsWith(".fw"))
+          .toArray(Path[]::new));
+    }
+  }
+  
+  public static Observable<FileWatcherDslContext> getDslContexts(Path dsl) {
+    return Observable.just(dsl)
+    .flatMap(dslPath -> {
+      if (Files.isDirectory(dslPath)) {
+        return getDslFiles(dslPath, 1);
+      } else {
+        return Observable.just(dslPath);
+      }
+    })
+    .map(FileWatcherDslRunner::parse)
+    ;
   }
 }
 ```
-这个方法可以实现fw文件更新，自动生效，而不需要重启File Watcher程序。
+注意`getDslContexts`方法，输入`Path`类型的变量`dsl`，它可以是文件，也可以是文件夹。
 
-可见，通过定义一种领域语言并支持来描述用户需求，一点都不难。
+先用`Observable.just`转成`Observable`对象，然后用`flatMap`，如果它是文件夹，就调用`getDslFiles`，其查找文件夹下的fw文件并将每个文件组织成`Obserable<Path>`，最后调用`parse`方法，使用`GroovyShell`执行`DSL`，为每个`fw`文件生成一个`FileWatcherDslContext`对象，其返回值`Observable<FileWatcherDslContext>`表示一个到多个`FileWatcherDslContext`对象的被观察者。
 
-好了，我们已经通过运行DSL得到了包含所有需求信息的`FileWatcherDslContext`对象，但是，目前用户想要的文件监控过程还没有开始，接下来就是从技术细节上怎么实现这个需求目标，欢迎继续阅读下一篇文章：[实验驱动开发与响应式编程 ---- File Watcher的技术实现](http://blog.csdn.net/liuwenzhe2008/article/details/52185447)。
+## RxJava简介
+本文代码中，不管是用户输入文件的解析，还是`WatchService`的使用和执行，都采用了响应式编程思维，将服务实现逻辑和响应处理逻辑分开，采用链式响应式过滤和组合的方式，即保持高可读性的同时，有灵活的处理复杂的逻辑，同时仍然保持着足够的可扩展性，还有强大的线程池支持和控制，这些都归功于RxJava这个优秀的库。
 
- ------ 本博客所有内容均为原创，转载请注明作者和出处 --------
+RxJava目前在还提供了众多的库支持，详情请参考其官方网页：https://github.com/ReactiveX 。
+
+ ------- 本博客所有内容均为原创，转载请注明作者和出处 -------
  
  作者：刘文哲
 
@@ -535,6 +655,6 @@ public class DslWatcher {
 
  博客：http://blog.csdn.net/liuwenzhe2008
 
- **源码**： 
-File Watcher核心库：https://github.com/WenzheLiu/filewatcher 
-File Watcher应用：https://github.com/WenzheLiu/filewatcher.app
+ **源码**：
+ File Watcher核心库：https://github.com/WenzheLiu/filewatcher
+ File Watcher应用：https://github.com/WenzheLiu/filewatcher.app
