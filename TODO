@@ -1,0 +1,13 @@
+GUI:
+1. when save, the status message is “Save xxxx.fwsuccessfully”. We should have a space between xxxx.fw and successfully.
+2. There is no title in Command dialog.
+3. In command dialog, rename the Path to “Find binary path in”. Support editing to Path text area and WorkDirectory text are. Rename “WorkDirectory” to “Work Directory”.
+4. Command dialog should support Environment to set environment. (currently command line version has already supported)
+5. support “Asyncchonize” button after “Print” button, it can generate code block like:
+async {
+  
+}
+6. when open file, the current behavior is always in “C:\” each time. Can we open with the folder that last selected?
+7. output: output the message, can we show the time in the first of each log message, for example, [2016.11.10 14:30:20.789] the log message content
+8. Export the package and Test in Linux to see if any issues in Linux
+9. Support watch the fw file itelf if in running state, for example, if we change the fw file from “start” to “stop”, it should also stop watching. (But the running status keep no change until clicking stop button)
