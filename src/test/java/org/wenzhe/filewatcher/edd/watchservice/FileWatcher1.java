@@ -21,7 +21,7 @@ import java.util.Map;
 import com.google.common.collect.ImmutableMap;
 
 /**
- * @author wen-zhe.liu@asml.com
+ * @author Wen-Zhe Liu
  *
  */
 public class FileWatcher1 {
